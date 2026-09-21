@@ -1,0 +1,8 @@
+{
+  "$schema": "https://antigravity.google/schemas/plugin.json",
+  "name": "agy-house-rules",
+  "version": "1.0.0",
+  "description": "Antigravity house-rules: read-only auto-approval, destructive command gating, coding standards injection, comment harvesting, and structured handover.",
+  "author": "Ajw2003",
+  "disabled": false
+}

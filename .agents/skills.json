@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "path": ".agents/skills"
+    },
+    {
+      "path": "plugins/agy-house-rules/skills"
+    }
+  ]
+}
