@@ -23,6 +23,11 @@ class TestAgyHooks(unittest.TestCase):
             "where.exe python",
             "where py",
             "Get-ChildItem -Path .",
+            'Get-ChildItem -Path "C:\\Users\\aj\\.gemini\\antigravity\\worktrees\\AjsAgyTools\\plugins\\agy-house-rules" -Recurse | Select-Object FullName, Length',
+            'powershell -Command "Get-ChildItem -Path . -Recurse | Select-Object FullName, Length"',
+            'pwsh -c "git status"',
+            'cmd /c "dir /b"',
+            'gh repo list Ajw2003 --limit 5',
             "python --version",
             "pytest tests/",
             "npm test"
@@ -50,7 +55,8 @@ class TestAgyHooks(unittest.TestCase):
             "git clean -fd",
             "kill -9 1234",
             "taskkill /f /im node.exe",
-            "Stop-Process -Name code -Force"
+            "Stop-Process -Name code -Force",
+            'powershell -Command "Get-ChildItem | Remove-Item -Force"'
         ]
         for cmd in destructive_commands:
             with self.subTest(command=cmd):

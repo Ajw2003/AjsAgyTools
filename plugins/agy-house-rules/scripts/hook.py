@@ -39,28 +39,75 @@ DESTRUCTIVE_COMMAND_PATTERNS = [
 
 # Priority 2: Safe Read-Only Auto-Approval
 READONLY_COMMAND_PATTERNS = [
-    # 1. Directory and File Inspection
-    r"^(dir|ls|Get-ChildItem)(\s+.*)?$",
-    r"^(cat|type|Get-Content|head|tail|more|less)(\s+.*)?$",
-    r"^(find|findstr|grep|rg|ripgrep|awk|sed -n)(\s+.*)?$",
-    r"^(where\.exe|where|which|Get-Command)(\s+.*)?$",
-    r"^(file|stat|wc)(\s+.*)?$",
+    # 1. Directory and File Inspection (including piped formatters/filters)
+    r"^(dir|ls|Get-ChildItem|gci)(\s+.*)?$",
+    r"^(cat|type|Get-Content|gc|head|tail|more|less)(\s+.*)?$",
+    r"^(Get-Item|Test-Path|Resolve-Path|gi)(\s+.*)?$",
+    r"^(Get-Location|pwd|gl)(\s+.*)?$",
+    r"^(find|findstr|grep|rg|ripgrep|awk|sed\s+-n|Select-String|sls)(\s+.*)?$",
+    r"^(where\.exe|where|which|Get-Command|gcm)(\s+.*)?$",
+    r"^(file|stat|wc|Measure-Object|measure)(\s+.*)?$",
+    r"^(Get-Process|gps|ps)(\s+.*)?$",
+    r"^(Get-Help|man)(\s+.*)?$",
 
-    # 2. Read-Only Git Inspection
-    r"^git\s+(status|diff|log|show|branch|tag|rev-parse|describe|remote\s+-v|config\s+--get)(\s+.*)?$",
+    # 2. Read-Only Git & GitHub Inspection
+    r"^git\s+(status|diff|log|show|branch|tag|rev-parse|describe|remote(\s+-v)?|config\s+--get)(\s+.*)?$",
+    r"^gh\s+(repo|issue|pr|release|run|workflow)\s+(list|view|status)(\s+.*)?$",
 
     # 3. Environment & Runtime Diagnostics
     r"^(python|python3|py)\s+(--version|-V|-c\s+['\"][^'\"]*['\"])$",
     r"^(node|npm|npx|pnpm|yarn|bun)\s+(--version|-v)$",
     r"^(dotnet|cargo|go|rustc)\s+(--version|-v)$",
-    r"^(echo|printenv|env|set)(\s+.*)?$",
+    r"^(echo|printenv|env|set|Write-Output|Write-Host)(\s+.*)?$",
 
     # 4. Safe Non-Mutating Testing & Linting (Read-Only Mode)
     r"^(pytest|npm\s+test|cargo\s+test|dotnet\s+test)(\s+.*)?$",
+    r"^(python\s+-m\s+unittest|python\s+tests/.*)(\s+.*)?$",
 ]
 
 # ==============================================================================
-# 2. Event Handlers
+# 2. Helper Functions
+# ==============================================================================
+
+def _unwrap_command(cmd: str) -> str:
+    """
+    Unwraps powershell -Command, pwsh -c, and cmd /c execution wrappers to evaluate the inner command.
+    """
+    s = cmd.strip()
+
+    # Match powershell / pwsh invocation
+    ps_prefix = re.match(r"^(?:powershell|pwsh)(?:\.exe)?\b", s, re.IGNORECASE)
+    if ps_prefix:
+        rest = s[ps_prefix.end():].strip()
+        while rest.startswith("-"):
+            m = re.match(r"^-([a-zA-Z0-9_-]+)\s*", rest)
+            if not m:
+                break
+            flag_name = m.group(1).lower()
+            rest = rest[m.end():].strip()
+            if flag_name in ("c", "command"):
+                break
+            # If flag has an argument like -ExecutionPolicy Bypass or -File foo.ps1
+            if flag_name in ("executionpolicy", "ep", "file", "configuration", "windowstyle"):
+                arg_match = re.match(r"^(\S+|['\"][^'\"]*['\"])\s*", rest)
+                if arg_match:
+                    rest = rest[arg_match.end():].strip()
+        if (rest.startswith('"') and rest.endswith('"')) or (rest.startswith("'") and rest.endswith("'")):
+            rest = rest[1:-1].strip()
+        return rest
+
+    # Match cmd /c
+    cmd_match = re.match(r"^cmd(?:\.exe)?\s+/c\s+(.*)$", s, re.IGNORECASE | re.DOTALL)
+    if cmd_match:
+        inner = cmd_match.group(1).strip()
+        if (inner.startswith('"') and inner.endswith('"')) or (inner.startswith("'") and inner.endswith("'")):
+            inner = inner[1:-1].strip()
+        return inner
+
+    return s
+
+# ==============================================================================
+# 3. Event Handlers
 # ==============================================================================
 
 def handle_pre_tool_use(payload: dict) -> dict:
@@ -82,17 +129,19 @@ def handle_pre_tool_use(payload: dict) -> dict:
     if not cmd:
         return {"decision": "allow"}
 
-    # Priority 1: Check Destructive / Risky Patterns
+    unwrapped = _unwrap_command(cmd)
+
+    # Priority 1: Check Destructive / Risky Patterns (both raw and unwrapped)
     for pattern, description in DESTRUCTIVE_COMMAND_PATTERNS:
-        if re.search(pattern, cmd, re.IGNORECASE):
+        if re.search(pattern, cmd, re.IGNORECASE) or re.search(pattern, unwrapped, re.IGNORECASE):
             return {
                 "decision": "ask",
                 "reason": f"house-rules: gated risky/destructive command ({description}): '{cmd}'"
             }
 
-    # Priority 2: Check Safe Read-Only Patterns
+    # Priority 2: Check Safe Read-Only Patterns (both raw and unwrapped)
     for pattern in READONLY_COMMAND_PATTERNS:
-        if re.match(pattern, cmd, re.IGNORECASE):
+        if re.match(pattern, cmd, re.IGNORECASE) or re.match(pattern, unwrapped, re.IGNORECASE):
             return {"decision": "allow"}
 
     # Fallback: Safe gating requiring confirmation
